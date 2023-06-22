@@ -1,0 +1,21 @@
+[package]
+name = "bitcoincore-zmqsequence"
+version = "0.1.0"
+edition = "2021"
+authors = ["dev7ba <dev7ba@protonmail.com>"]
+description = "A rust library to listen zmq sequence msgs from bitcoin core"
+keywords = ["bitcoin", "mempool","zmq"]
+categories = ["cryptography::cryptocurrencies"]
+license = "MIT OR Apache-2.0"
+repository= "https://github.com/dev7ba/bitcoincore-zmq"
+readme="README.md"
+
+[features]
+check_node =["dep:bitcoincore-rpc"]
+
+[dependencies]
+hex = "0.4.3"
+url = { version="2.3.1"}
+zmq = "0.10.0"
+thiserror = "1.0.39"
+bitcoincore-rpc = {version="0.17.0", optional=true}
