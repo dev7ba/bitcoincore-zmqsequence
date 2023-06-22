@@ -7,7 +7,7 @@ description = "A rust library to listen zmq sequence msgs from bitcoin core"
 keywords = ["bitcoin", "mempool","zmq"]
 categories = ["cryptography::cryptocurrencies"]
 license = "MIT OR Apache-2.0"
-repository= "https://github.com/dev7ba/bitcoincore-zmq"
+repository= "https://github.com/dev7ba/bitcoincore-zmqsequence"
 readme="README.md"
 
 [features]

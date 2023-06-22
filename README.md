@@ -1,4 +1,4 @@
-# bitcoincore-zmq
+# bitcoincore-zmqsequence
 A ZeroMQ pubsequence listener.
 Allows keeping a synchronized copy of a Bitcoin Core node's mempool.
 Example:
