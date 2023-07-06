@@ -7,6 +7,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use url::Url;
 
@@ -159,39 +160,51 @@ impl ZmqSeqListener {
         //Use a barrier, Zmq is "slow joiner"
         let barrier = Arc::new(Barrier::new(2));
         let barrierc = barrier.clone();
-        let thread = thread::spawn(move || {
-            let mut is_starting = true;
-            let mut last_zmq_seq = 0;
-            while !stop_th.load(Ordering::SeqCst) {
-                let mpsq = match receive_mpsq(&subscriber) {
-                    Ok(mpsq) => mpsq,
-                    Err(e) => MempoolSequence::SeqError { error: e },
-                };
-                if is_starting {
-                    barrier.wait();
-                    tx.send(MempoolSequence::SeqStart {
-                        bitcoind_already_working: check_bitcoind_already_working(&mpsq),
-                    })
-                    .unwrap();
-                    is_starting = false;
-                } else {
-                    let zmq_seq = zmq_seq_from(&mpsq);
-                    if zmq_seq.is_some() {
-                        if zmq_seq.unwrap() != last_zmq_seq + 1 {
-                            tx.send(MempoolSequence::SeqError {
-                                error: ZMQSeqListenerError::InvalidSeqNumber(
-                                    last_zmq_seq + 1,
-                                    zmq_seq.unwrap(),
-                                ),
-                            })
-                            .unwrap();
+        let thread = thread::Builder::new()
+            .name(String::from("zmq_seq_listener"))
+            .spawn(move || {
+                let mut is_starting = true;
+                let mut last_zmq_seq = 0;
+                while !stop_th.load(Ordering::SeqCst) {
+                    let mpsq;
+                    match receive_mpsq(&subscriber, &stop_th) {
+                        Ok(mpsq_ok) => mpsq = mpsq_ok,
+                        Err(e) => match e {
+                            ZMQSeqListenerError::Interrupted() => {
+                                if is_starting {
+                                    barrier.wait();
+                                }
+                                break;
+                            }
+                            _ => mpsq = MempoolSequence::SeqError { error: e },
+                        },
+                    };
+                    if is_starting {
+                        barrier.wait();
+                        tx.send(MempoolSequence::SeqStart {
+                            bitcoind_already_working: check_bitcoind_already_working(&mpsq),
+                        })
+                        .unwrap();
+                        is_starting = false;
+                    } else {
+                        let zmq_seq = zmq_seq_from(&mpsq);
+                        if zmq_seq.is_some() {
+                            if zmq_seq.unwrap() != last_zmq_seq + 1 {
+                                tx.send(MempoolSequence::SeqError {
+                                    error: ZMQSeqListenerError::InvalidSeqNumber(
+                                        last_zmq_seq + 1,
+                                        zmq_seq.unwrap(),
+                                    ),
+                                })
+                                .unwrap();
+                            }
                         }
                     }
+                    last_zmq_seq = zmq_seq_from(&mpsq).unwrap_or(last_zmq_seq);
+                    tx.send(mpsq).unwrap();
                 }
-                last_zmq_seq = zmq_seq_from(&mpsq).unwrap_or(last_zmq_seq);
-                tx.send(mpsq).unwrap();
-            }
-        });
+            })
+            .unwrap();
         barrierc.wait();
         Ok(ZmqSeqListener { rx, stop, thread })
     }
@@ -218,11 +231,30 @@ fn zmq_seq_from(mpsq: &MempoolSequence) -> Option<u32> {
     }
 }
 
-fn receive_mpsq(subscriber: &zmq::Socket) -> Result<MempoolSequence, ZMQSeqListenerError> {
-    let res = {
-        let msg = subscriber.recv_multipart(0)?;
-        let mpsq = MempoolSequence::try_from(msg)?;
-        Ok(mpsq)
-    };
-    res
+fn receive_mpsq(
+    subscriber: &zmq::Socket,
+    stop_th: &Arc<AtomicBool>,
+) -> Result<MempoolSequence, ZMQSeqListenerError> {
+    loop {
+        match subscriber.recv_multipart(zmq::DONTWAIT) {
+            Ok(msg) => {
+                let mpsq = MempoolSequence::try_from(msg)?;
+                return Ok(mpsq);
+            }
+            Err(e) => {
+                if e == zmq::Error::EAGAIN {
+                    thread::sleep(Duration::from_millis(100));
+                    if !stop_th.load(Ordering::SeqCst) {
+                        continue;
+                    } else {
+                        return Err(ZMQSeqListenerError::Interrupted());
+                    }
+                } else {
+                    return Ok(MempoolSequence::SeqError {
+                        error: ZMQSeqListenerError::ZMQError(e),
+                    });
+                }
+            }
+        }
+    }
 }

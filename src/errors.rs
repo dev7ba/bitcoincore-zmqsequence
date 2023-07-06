@@ -23,4 +23,7 @@ pub enum ZMQSeqListenerError {
     ///Invalid sequence number
     #[error("Invalid ZMQ secuence number, should be {0}, but it is {1}")]
     InvalidSeqNumber(u32, u32),
+    ///Interrupted error
+    #[error("ZMQ Listener has been interrupted")]
+    Interrupted(),
 }
